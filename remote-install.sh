@@ -6,8 +6,8 @@ echo "TypeScript Remote Agent - Remote Installer"
 echo "========================================="
 
 # Configuration
-GITHUB_USER="${GITHUB_USER:-YOUR_GITHUB_USERNAME}"
-GITHUB_REPO="${GITHUB_REPO:-YOUR_REPO_NAME}"
+GITHUB_USER="${GITHUB_USER:-batmunkh0612}"
+GITHUB_REPO="${GITHUB_REPO:-macos-agent-with-typescript}"
 GITHUB_BRANCH="${GITHUB_BRANCH:-main}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-ts}"
 
