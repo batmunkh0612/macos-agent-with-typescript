@@ -69,7 +69,8 @@ async function deleteUser(args: any): Promise<any> {
     if (!username) return { error: "Username required" };
     
     if (process.platform === 'darwin') {
-        const cmd = rootCmd(`sysadminctl -deleteUser -userName "${username}"`);
+        // Username must come directly after -deleteUser
+        const cmd = rootCmd(`sysadminctl -deleteUser ${username}`);
         return await execPromise(cmd);
     } else {
         const cmd = rootCmd(`userdel -r ${username}`);
@@ -110,13 +111,14 @@ async function userExists(args: any): Promise<any> {
     }
 }
 
-function execPromise(command: string): Promise<{ stdout: string, stderr: string }> {
-    return new Promise((resolve, reject) => {
+function execPromise(command: string): Promise<{ stdout: string, stderr: string, success: boolean, error?: string }> {
+    return new Promise((resolve) => {
         exec(command, (error, stdout, stderr) => {
             if (error) {
-                reject({ message: error.message, stdout, stderr });
+                // Return error as resolved with success: false
+                resolve({ stdout, stderr, success: false, error: error.message });
             } else {
-                resolve({ stdout, stderr });
+                resolve({ stdout, stderr, success: true });
             }
         });
     });
