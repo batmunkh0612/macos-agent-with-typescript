@@ -51,7 +51,7 @@ async function createUser(args: any): Promise<any> {
 
     if (process.platform === 'darwin') {
         // macOS sysadminctl
-        const cmd = rootCmd(`sysadminctl -addUser -fullName "${fullname || username}" -jobTitle "User" -password "${password}" -userName "${username}" ${admin ? '-admin' : ''}`);
+        const cmd = rootCmd(`sysadminctl -addUser -fullName "${fullname || username}" -password "${password}" -userName "${username}" ${admin ? '-admin' : ''}`);
         return await execPromise(cmd);
     } else {
         // Linux useradd
