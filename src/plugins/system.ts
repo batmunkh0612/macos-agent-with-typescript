@@ -29,6 +29,14 @@ interface ExecResult {
   returncode: number;
 }
 
+interface MacUserState {
+  exists: boolean;
+  listed: boolean;
+  dscl_readable: boolean;
+  id_resolves: boolean;
+  list_error?: string;
+}
+
 export const handle = async (args: SystemArgs): Promise<any> => {
   try {
     if (args.info) {
@@ -139,12 +147,17 @@ async function deleteUser(args: any): Promise<any> {
         const stderr = result.stderr || '';
         const sawSecureTokenError = stderr.includes('-14120') || stderr.includes('Error:-14120');
 
-        let userStillExists = await macUserExists(username);
+        let verificationState = await waitForMacUserState(username);
+        let userStillExists = verificationState.exists;
 
         if (userStillExists && forceDsclFallback) {
             logger.warn(`User ${username} still present after sysadminctl, trying dscl fallback`);
-            await execPromise(rootCmd(`dscl . -delete /Users/${username}`), { timeout: 15000 });
-            userStillExists = await macUserExists(username);
+            const fallbackResult = await execPromise(rootCmd(`dscl . -delete /Users/${username}`), { timeout: 15000 });
+            verificationState = await waitForMacUserState(username);
+            userStillExists = verificationState.exists;
+            if (!fallbackResult.success) {
+                logger.warn(`dscl fallback failed for ${username}: ${fallbackResult.stderr || fallbackResult.error}`);
+            }
         }
 
         if (userStillExists) {
@@ -153,6 +166,7 @@ async function deleteUser(args: any): Promise<any> {
                     success: false,
                     error: 'Secure Token blocked deletion (Error -14120). Retry with remove_secure_token=true, password=<user_password>, and optionally admin_user/admin_password.',
                     verification_failed: true,
+                    verification: verificationState,
                     stdout: result.stdout,
                     stderr: result.stderr,
                     returncode: result.returncode,
@@ -162,6 +176,7 @@ async function deleteUser(args: any): Promise<any> {
                 success: false,
                 error: `User ${username} still appears in Directory Service after deletion`,
                 verification_failed: true,
+                verification: verificationState,
                 stdout: result.stdout,
                 stderr: result.stderr,
                 returncode: result.returncode,
@@ -256,21 +271,40 @@ async function getMacUsers(): Promise<{ success: boolean; users: string[]; stder
     return { success: true, users, stderr: result.stderr };
 }
 
-async function macUserExists(username: string): Promise<boolean> {
-    const retries = 3;
-    for (let i = 0; i < retries; i++) {
-        const listed = await getMacUsers();
-        if (!listed.success) {
-            return true;
-        }
-        if (!listed.users.includes(username)) {
-            return false;
-        }
-        if (i < retries - 1) {
-            await sleep(1000);
+async function getMacUserState(username: string): Promise<MacUserState> {
+    const readResult = await execPromise(`dscl . -read /Users/${username}`, { timeout: 10000 });
+    const listed = await getMacUsers();
+    const idResult = await execPromise(`id ${username}`, { timeout: 10000 });
+
+    const listedUser = listed.success ? listed.users.includes(username) : false;
+    const exists = readResult.success || listedUser || idResult.success;
+
+    return {
+        exists,
+        listed: listedUser,
+        dscl_readable: readResult.success,
+        id_resolves: idResult.success,
+        list_error: listed.success ? undefined : (listed.error || listed.stderr || undefined),
+    };
+}
+
+async function waitForMacUserState(username: string): Promise<MacUserState> {
+    const retries = 8;
+    const delayMs = 2000;
+    let lastState: MacUserState = await getMacUserState(username);
+    if (!lastState.exists) {
+        return lastState;
+    }
+
+    for (let i = 1; i < retries; i++) {
+        await sleep(delayMs);
+        lastState = await getMacUserState(username);
+        if (!lastState.exists) {
+            return lastState;
         }
     }
-    return true;
+
+    return lastState;
 }
 
 async function pathExists(path: string): Promise<boolean> {
