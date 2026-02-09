@@ -81,8 +81,8 @@ async function createUser(args) {
     if (!username || !password)
         return { error: "Username and password required" };
     if (process.platform === 'darwin') {
-        // macOS sysadminctl
-        const cmd = rootCmd(`sysadminctl -addUser -fullName "${fullname || username}" -password "${password}" -userName "${username}" ${admin ? '-admin' : ''}`);
+        // macOS sysadminctl - username must come right after -addUser
+        const cmd = rootCmd(`sysadminctl -addUser ${username} -fullName "${fullname || username}" -password "${password}" ${admin ? '-admin' : ''}`);
         return await execPromise(cmd);
     }
     else {
