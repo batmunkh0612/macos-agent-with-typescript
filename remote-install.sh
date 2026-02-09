@@ -43,7 +43,7 @@ echo ""
 echo "Downloading agent from GitHub..."
 
 # Download the necessary files
-GITHUB_BASE="https://raw.githubusercontent.com/$GITHUB_USER/$GITHUB_REPO/$GITHUB_BRANCH/agent/typescript-version"
+GITHUB_BASE="https://raw.githubusercontent.com/$GITHUB_USER/$GITHUB_REPO/$GITHUB_BRANCH"
 
 # Core files
 curl -fsSL "$GITHUB_BASE/package.json" -o package.json
