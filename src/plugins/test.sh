@@ -1,1 +1,1 @@
-sudo sysadminctl -adminUser bgo6d -adminPassword "BAbatka0612" -deleteUser test
+sudo sysadminctl -adminUser admin -adminPassword "pineAdmin88" -deleteUser user2
