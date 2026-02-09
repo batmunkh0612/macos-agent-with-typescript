@@ -6,13 +6,33 @@ echo "TypeScript Remote Agent - Uninstaller"
 echo "========================================="
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-ts}"
-PLIST_PATH="$HOME/Library/LaunchAgents/com.remote-agent-ts.plist"
+
+# Check for both user mode and root mode installations
+USER_PLIST="$HOME/Library/LaunchAgents/com.remote-agent-ts.plist"
+ROOT_PLIST="/Library/LaunchDaemons/com.remote-agent-ts.plist"
+
+if [ -f "$ROOT_PLIST" ]; then
+    MODE="root"
+    PLIST_PATH="$ROOT_PLIST"
+    LOG_DIR="/var/log"
+elif [ -f "$USER_PLIST" ]; then
+    MODE="user"
+    PLIST_PATH="$USER_PLIST"
+    LOG_DIR="$HOME/Library/Logs"
+else
+    MODE="none"
+    PLIST_PATH=""
+fi
 
 echo ""
 echo "This will remove:"
 echo "  - Installation directory: $INSTALL_DIR"
-echo "  - LaunchAgent plist: $PLIST_PATH"
-echo "  - Log files: ~/Library/Logs/remote-agent-ts*.log"
+if [ "$MODE" != "none" ]; then
+    echo "  - LaunchD plist: $PLIST_PATH"
+    echo "  - Log files: $LOG_DIR/remote-agent-ts*.log"
+else
+    echo "  - No active service found"
+fi
 echo ""
 read -p "Continue? (y/N) " -n 1 -r
 echo
@@ -23,15 +43,22 @@ fi
 
 echo ""
 echo "Stopping agent service..."
-if [ -f "$PLIST_PATH" ]; then
+if [ "$MODE" = "root" ]; then
+    sudo launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    echo "✓ Service stopped (root mode)"
+    
+    echo "Removing plist file..."
+    sudo rm -f "$PLIST_PATH"
+    echo "✓ Plist removed"
+elif [ "$MODE" = "user" ]; then
     launchctl unload "$PLIST_PATH" 2>/dev/null || true
-    echo "✓ Service stopped"
+    echo "✓ Service stopped (user mode)"
     
     echo "Removing plist file..."
     rm -f "$PLIST_PATH"
     echo "✓ Plist removed"
 else
-    echo "⚠️  Plist file not found, skipping"
+    echo "⚠️  No service found, skipping"
 fi
 
 echo ""
@@ -45,8 +72,13 @@ fi
 
 echo ""
 echo "Removing log files..."
-rm -f ~/Library/Logs/remote-agent-ts.log
-rm -f ~/Library/Logs/remote-agent-ts-error.log
+if [ "$MODE" = "root" ]; then
+    sudo rm -f /var/log/remote-agent-ts.log
+    sudo rm -f /var/log/remote-agent-ts-error.log
+else
+    rm -f ~/Library/Logs/remote-agent-ts.log
+    rm -f ~/Library/Logs/remote-agent-ts-error.log
+fi
 echo "✓ Log files removed"
 
 echo ""
