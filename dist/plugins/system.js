@@ -278,12 +278,15 @@ async function getMacUserState(username) {
     const listed = await getMacUsers();
     const idResult = await execPromise(`id ${username}`, { timeout: 10000 });
     const listedUser = listed.success ? listed.users.includes(username) : false;
-    const exists = readResult.success || listedUser || idResult.success;
+    // Treat dscl-read/id as authoritative; dscl-list can lag after deletion.
+    const exists = readResult.success || idResult.success;
+    const listedOnly = listedUser && !readResult.success && !idResult.success;
     return {
         exists,
         listed: listedUser,
         dscl_readable: readResult.success,
         id_resolves: idResult.success,
+        listed_only: listedOnly,
         list_error: listed.success ? undefined : (listed.error || listed.stderr || undefined),
     };
 }
