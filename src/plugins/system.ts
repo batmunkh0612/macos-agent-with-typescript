@@ -137,16 +137,7 @@ async function deleteUser(args: any): Promise<any> {
         const result = await execPromise(cmd, { timeout: 60000 });
 
         const stderr = result.stderr || '';
-        if (stderr.includes('-14120') || stderr.includes('Error:-14120')) {
-            return {
-                success: false,
-                error: 'Secure Token blocked deletion (Error -14120). Retry with remove_secure_token=true, password=<user_password>, and optionally admin_user/admin_password.',
-                verification_failed: true,
-                stdout: result.stdout,
-                stderr: result.stderr,
-                returncode: result.returncode,
-            };
-        }
+        const sawSecureTokenError = stderr.includes('-14120') || stderr.includes('Error:-14120');
 
         let userStillExists = await macUserExists(username);
 
@@ -157,6 +148,16 @@ async function deleteUser(args: any): Promise<any> {
         }
 
         if (userStillExists) {
+            if (sawSecureTokenError) {
+                return {
+                    success: false,
+                    error: 'Secure Token blocked deletion (Error -14120). Retry with remove_secure_token=true, password=<user_password>, and optionally admin_user/admin_password.',
+                    verification_failed: true,
+                    stdout: result.stdout,
+                    stderr: result.stderr,
+                    returncode: result.returncode,
+                };
+            }
             return {
                 success: false,
                 error: `User ${username} still appears in Directory Service after deletion`,
@@ -178,6 +179,10 @@ async function deleteUser(args: any): Promise<any> {
             homeDirectoryRemoved = !homeExists;
         }
 
+        if (sawSecureTokenError) {
+            logger.warn(`sysadminctl reported -14120 for ${username}, but user deletion was verified`);
+        }
+
         return {
             success: true,
             message: `User ${username} deleted successfully`,
@@ -185,6 +190,7 @@ async function deleteUser(args: any): Promise<any> {
             secure_delete: secure,
             home_directory_removed: homeDirectoryRemoved,
             verified: true,
+            warnings: sawSecureTokenError ? ['sysadminctl reported -14120, but user was verified as deleted'] : [],
             stdout: result.stdout,
             stderr: result.stderr,
         };
