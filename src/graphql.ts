@@ -15,13 +15,15 @@ import {
   GetPluginsQuery,
   GetAgentStatusDocument,
   GetAgentStatusQuery,
-  AgentCommand,
-  AgentPlugin,
-  AgentHeartbeat,
 } from './graphql/generated/graphql';
 import { print } from 'graphql';
 
 const logger = createLogger('GraphQLClient');
+const REQUEST_TIMEOUT_MS = 30000;
+
+type GraphQLErrorResult = {
+  message: string;
+};
 
 export class GraphQLClient {
   private url: string;
@@ -30,33 +32,43 @@ export class GraphQLClient {
     this.url = url;
   }
 
-  private async execute<TData = any, TVariables = any>(
-    document: any,
+  private async postRequest<TVariables extends Record<string, unknown>>(
+    document: unknown,
     variables?: TVariables
-  ): Promise<{ data?: TData; errors?: any[] }> {
-    try {
-      const query = print(document);
-      const response = await axios.post(
-        this.url,
-        {
-          query,
-          variables: variables || {},
-        },
-        {
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 10000,
-        }
-      );
-
-      if (response.data.errors) {
-        logger.error(`GraphQL errors: ${JSON.stringify(response.data.errors)}`);
-        return { errors: response.data.errors };
+  ) {
+    const query = print(document as never);
+    return axios.post(
+      this.url,
+      {
+        query,
+        variables: variables || {},
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: REQUEST_TIMEOUT_MS,
       }
+    );
+  }
 
-      return response.data;
-    } catch (error: any) {
-      logger.error(`GraphQL request failed: ${error.message}`);
-      return { errors: [{ message: error.message }] };
+  private parseResponse<TData>(payload: { data?: TData; errors?: GraphQLErrorResult[] }) {
+    if (payload.errors) {
+      logger.error(`GraphQL errors: ${JSON.stringify(payload.errors)}`);
+      return { errors: payload.errors };
+    }
+    return payload;
+  }
+
+  private async execute<TData, TVariables extends Record<string, unknown>>(
+    document: unknown,
+    variables?: TVariables
+  ): Promise<{ data?: TData; errors?: GraphQLErrorResult[] }> {
+    try {
+      const response = await this.postRequest(document, variables);
+      return this.parseResponse(response.data as { data?: TData; errors?: GraphQLErrorResult[] });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`GraphQL request failed: ${message}`);
+      return { errors: [{ message }] };
     }
   }
 
@@ -69,7 +81,7 @@ export class GraphQLClient {
     return result.data?.getPendingCommands || [];
   }
 
-  async updateCommandStatus(id: number, status: string, result: any = null): Promise<void> {
+  async updateCommandStatus(id: number, status: string, result: unknown = null): Promise<void> {
     await this.execute<UpdateStatusMutation, UpdateStatusMutationVariables>(
       UpdateStatusDocument,
       { id, status, result }
@@ -81,7 +93,7 @@ export class GraphQLClient {
     try {
       const ipRes = await axios.get('https://api.ipify.org', { timeout: 5000 });
       ipAddress = ipRes.data;
-    } catch (e) {
+    } catch {
       // Ignore
     }
 
@@ -98,12 +110,12 @@ export class GraphQLClient {
   }
 
   async syncPlugins(): Promise<GetPluginsQuery['getPlugins']> {
-    const result = await this.execute<GetPluginsQuery>(GetPluginsDocument);
+    const result = await this.execute<GetPluginsQuery, Record<string, unknown>>(GetPluginsDocument);
     return result.data?.getPlugins || [];
   }
 
   async getAgentStatus(): Promise<GetAgentStatusQuery['getAgentStatus']> {
-    const result = await this.execute<GetAgentStatusQuery>(GetAgentStatusDocument);
+    const result = await this.execute<GetAgentStatusQuery, Record<string, unknown>>(GetAgentStatusDocument);
     return result.data?.getAgentStatus || [];
   }
 }

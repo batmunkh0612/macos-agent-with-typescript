@@ -43,29 +43,37 @@ const os = __importStar(require("os"));
 const graphql_1 = require("./graphql/generated/graphql");
 const graphql_2 = require("graphql");
 const logger = (0, logger_1.createLogger)('GraphQLClient');
+const REQUEST_TIMEOUT_MS = 30000;
 class GraphQLClient {
     constructor(url) {
         this.url = url;
     }
+    async postRequest(document, variables) {
+        const query = (0, graphql_2.print)(document);
+        return axios_1.default.post(this.url, {
+            query,
+            variables: variables || {},
+        }, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: REQUEST_TIMEOUT_MS,
+        });
+    }
+    parseResponse(payload) {
+        if (payload.errors) {
+            logger.error(`GraphQL errors: ${JSON.stringify(payload.errors)}`);
+            return { errors: payload.errors };
+        }
+        return payload;
+    }
     async execute(document, variables) {
         try {
-            const query = (0, graphql_2.print)(document);
-            const response = await axios_1.default.post(this.url, {
-                query,
-                variables: variables || {},
-            }, {
-                headers: { 'Content-Type': 'application/json' },
-                timeout: 10000,
-            });
-            if (response.data.errors) {
-                logger.error(`GraphQL errors: ${JSON.stringify(response.data.errors)}`);
-                return { errors: response.data.errors };
-            }
-            return response.data;
+            const response = await this.postRequest(document, variables);
+            return this.parseResponse(response.data);
         }
         catch (error) {
-            logger.error(`GraphQL request failed: ${error.message}`);
-            return { errors: [{ message: error.message }] };
+            const message = error instanceof Error ? error.message : String(error);
+            logger.error(`GraphQL request failed: ${message}`);
+            return { errors: [{ message }] };
         }
     }
     async getPendingCommands(agentId, limit = 10) {
@@ -81,7 +89,7 @@ class GraphQLClient {
             const ipRes = await axios_1.default.get('https://api.ipify.org', { timeout: 5000 });
             ipAddress = ipRes.data;
         }
-        catch (e) {
+        catch {
             // Ignore
         }
         await this.execute(graphql_1.HeartbeatDocument, {

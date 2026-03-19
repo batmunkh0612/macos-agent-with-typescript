@@ -36,6 +36,10 @@ function isUserFlag(flag: string): boolean {
   return flag === '--user' || flag === '-u';
 }
 
+function isHttpUrl(value: string): boolean {
+  return value.startsWith('http://') || value.startsWith('https://');
+}
+
 function applyOption(result: RawCliOptions, flag: string, value: string | undefined): void {
   if (isImageFlag(flag)) {
     result.imagePath = value;
@@ -64,7 +68,7 @@ function normalizeOptions(raw: RawCliOptions): CliOptions {
     throw new Error('Usage: change-wallpaper --image <path> [--user <username>]');
   }
 
-  const resolved = path.resolve(imagePath);
+  const resolved = isHttpUrl(imagePath) ? imagePath : path.resolve(imagePath);
   return { imagePath: resolved, username: raw.username };
 }
 

@@ -1,7 +1,9 @@
 import { exec } from 'child_process';
 import * as fs from 'fs/promises';
+import * as path from 'path';
 import * as os from 'os';
 import { promisify } from 'util';
+import axios from 'axios';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('Plugin.Wallpaper');
@@ -22,6 +24,7 @@ interface PluginResult {
 }
 
 const actionSet = 'set';
+const URL_TIMEOUT_MS = 30000;
 
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -46,6 +49,27 @@ async function ensureImageExists(imagePath: string): Promise<PluginResult | null
   }
 }
 
+function isHttpUrl(value: string): boolean {
+  return value.startsWith('http://') || value.startsWith('https://');
+}
+
+function tempFilePathFromUrl(imageUrl: string): string {
+  const parsed = new URL(imageUrl);
+  const ext = path.extname(parsed.pathname) || '.jpg';
+  const filename = `agent-wallpaper-${Date.now()}${ext}`;
+  return path.join(os.tmpdir(), filename);
+}
+
+async function downloadImageFromUrl(imageUrl: string): Promise<string> {
+  const targetPath = tempFilePathFromUrl(imageUrl);
+  const response = await axios.get<ArrayBuffer>(imageUrl, {
+    responseType: 'arraybuffer',
+    timeout: URL_TIMEOUT_MS,
+  });
+  await fs.writeFile(targetPath, Buffer.from(response.data));
+  return targetPath;
+}
+
 function getSyncValidationError(args: WallpaperArgs): PluginResult | null {
   const platformErr = platformError();
   if (platformErr) return platformErr;
@@ -55,13 +79,18 @@ function getSyncValidationError(args: WallpaperArgs): PluginResult | null {
 async function firstValidationError(args: WallpaperArgs): Promise<PluginResult | null> {
   const syncErr = getSyncValidationError(args);
   if (syncErr) return syncErr;
-  return await ensureImageExists(args.image_path as string);
+  const imagePath = args.image_path as string;
+  if (isHttpUrl(imagePath)) return null;
+  return await ensureImageExists(imagePath);
 }
 
 async function runSet(args: WallpaperArgs): Promise<PluginResult> {
   const err = await firstValidationError(args);
   if (err) return err;
-  const imagePath = args.image_path as string;
+  const rawImagePath = args.image_path as string;
+  const imagePath = isHttpUrl(rawImagePath)
+    ? await downloadImageFromUrl(rawImagePath)
+    : rawImagePath;
   const username = args.username ?? os.userInfo().username;
   logger.info(`Setting wallpaper for user: ${username}, image: ${imagePath}`);
   return setWallpaperMac(imagePath, username);

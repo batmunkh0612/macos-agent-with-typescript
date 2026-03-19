@@ -47,7 +47,13 @@ export class CommandService {
   }
 
   public setWebSocketStatus(connected: boolean): void {
+    const wasConnected = this.wsConnected;
     this.wsConnected = connected;
+    if (wasConnected && !connected && this.running) {
+      // Recover quickly when websocket drops instead of waiting for next interval.
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      this.pollWithErrorHandling();
+    }
   }
 
   public start(): void {

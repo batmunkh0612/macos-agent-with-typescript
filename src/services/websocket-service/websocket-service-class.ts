@@ -121,6 +121,8 @@ export class WebSocketService {
   private handleError(error: Error): void {
     logger.error(`WebSocket error: ${error.message}`);
     this.disconnect();
+    if (this.handler.onDisconnected) this.handler.onDisconnected();
+    if (this.running) this.reconnectScheduler.schedule(() => this.connect(), () => this.running);
   }
 
   private disconnect(): void {
