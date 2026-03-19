@@ -78,6 +78,40 @@ fi
 
 cd "$INSTALL_DIR"
 
+# Validate required files exist after copy (prevents confusing TypeScript errors).
+required_files=(
+  "src/agent.ts"
+  "src/agent-class.ts"
+  "src/plugins/nginx.ts"
+  "src/plugins/nginx/index.ts"
+  "src/plugins/nginx/types.ts"
+  "src/plugins/system.ts"
+  "src/plugins/system/index.ts"
+  "src/plugins/system/types.ts"
+  "codegen.ts"
+  "package.json"
+  "tsconfig.json"
+)
+
+missing_files=()
+for f in "${required_files[@]}"; do
+  if [ ! -f "$INSTALL_DIR/$f" ]; then
+    missing_files+=("$f")
+  fi
+done
+
+if [ ${#missing_files[@]} -gt 0 ]; then
+  echo "❌ Installation source is incomplete for branch: $GITHUB_BRANCH"
+  echo "Missing files:"
+  for f in "${missing_files[@]}"; do
+    echo "  - $f"
+  done
+  echo ""
+  echo "Make sure those files are committed and pushed to:"
+  echo "https://github.com/$GITHUB_USER/$GITHUB_REPO/tree/$GITHUB_BRANCH"
+  exit 1
+fi
+
 # Config template
 echo "Creating default config..."
 cat > config.yaml <<EOF
