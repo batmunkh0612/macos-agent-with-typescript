@@ -5,23 +5,13 @@ import { PluginManager } from './plugin-manager';
 import { HeartbeatService } from './services/heartbeat-service';
 import { CommandService } from './services/command-service';
 import { WebSocketService } from './services/websocket-service';
-import { setupGracefulShutdown } from './shutdown';
 import { createLogger } from './utils/logger';
 
 const logger = createLogger('Agent');
-
 const VERSION = '2.1.0-ts';
 const RELEASE_DATE = '2026-02-09';
-const RELEASE_NOTES = 'TypeScript port of the remote agent - Refactored with service-oriented architecture';
-
-function runOneShutdownHandler(handler: () => void): void {
-  try {
-    handler();
-  } catch (e: unknown) {
-    const error = e instanceof Error ? e : new Error(String(e));
-    logger.error(`Error during shutdown: ${error.message}`);
-  }
-}
+const RELEASE_NOTES =
+  'TypeScript port of the remote agent - Refactored with service-oriented architecture';
 
 export class Agent {
   private config: AgentConfig;
@@ -59,13 +49,7 @@ export class Agent {
         pollInterval: this.config.get('agent').poll_interval,
       },
       this.graphql,
-      this.pluginManager,
-      {
-        onCommandExecuted: (..._args: [number, string, unknown]) => {
-          void _args;
-          // Handler registered but not actively used - kept for future extensibility
-        },
-      }
+      this.pluginManager
     );
 
     this.websocketService = new WebSocketService(
@@ -82,15 +66,8 @@ export class Agent {
             command as { id: number; command: string | Record<string, unknown> }
           );
         },
-        onPing: () => logger.debug('Received ping from server'),
-        onConnected: () => {
-          logger.info('WebSocket connected - switching to real-time mode');
-          this.updateServiceStatuses(true);
-        },
-        onDisconnected: () => {
-          logger.info('WebSocket disconnected - switching to polling mode');
-          this.updateServiceStatuses(false);
-        },
+        onConnected: () => this.updateServiceStatuses(true),
+        onDisconnected: () => this.updateServiceStatuses(false),
       }
     );
 
@@ -111,25 +88,44 @@ export class Agent {
     this.commandService.setWebSocketStatus(wsConnected);
   }
 
+  private executeShutdownHandlers(): void {
+    for (const handler of this.shutdownHandlers) {
+      try {
+        handler();
+      } catch (e: unknown) {
+        const error = e instanceof Error ? e : new Error(String(e));
+        logger.error(`Error during shutdown: ${error.message}`);
+      }
+    }
+  }
+
+  private setupGracefulShutdown(): void {
+    const shutdown = (signal: string) => {
+      logger.info(`Received ${signal}, shutting down gracefully...`);
+      this.running = false;
+      this.executeShutdownHandlers();
+      logger.info('Shutdown complete');
+      process.exit(0);
+    };
+
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('uncaughtException', (error) => {
+      logger.error(`Uncaught exception: ${error.message}`);
+      if (error.stack) logger.error(error.stack);
+      shutdown('uncaughtException');
+    });
+  }
+
   public async start(): Promise<void> {
     logger.info('🚀 Starting agent...');
     logger.info(`Working directory: ${process.cwd()}`);
-
     await this.pluginManager.loadLocalPlugins();
-
     this.heartbeatService.start();
     this.commandService.start();
     this.websocketService.start();
-
-    setupGracefulShutdown(this);
-
+    this.setupGracefulShutdown();
     logger.info('✅ Agent started successfully');
-  }
-
-  private executeShutdownHandlers(): void {
-    for (const handler of this.shutdownHandlers) {
-      runOneShutdownHandler(handler);
-    }
   }
 
   public stop(): void {

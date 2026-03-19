@@ -2,38 +2,48 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handle = void 0;
 const child_process_1 = require("child_process");
-const logger_1 = require("../utils/logger");
-const logger = (0, logger_1.createLogger)('Plugin.Shell');
-const handle = async (args) => {
-    const script = args.script;
-    const timeout = (args.timeout || 30) * 1000;
-    const cwd = args.cwd;
-    if (!script) {
-        return { success: false, error: "Missing 'script' argument" };
+const util_1 = require("util");
+const execAsync = (0, util_1.promisify)(child_process_1.exec);
+function getExitCode(error) {
+    if (error && typeof error === 'object' && 'code' in error) {
+        const code = error.code;
+        return typeof code === 'number' ? code : 1;
     }
-    logger.info(`Executing shell script: ${script} (timeout: ${timeout / 1000}s)`);
-    return new Promise((resolve) => {
-        try {
-            (0, child_process_1.exec)(script, { timeout, cwd }, (error, stdout, stderr) => {
-                const exitCode = error ? error.code : 0;
-                const result = {
-                    success: !error,
-                    exit_code: exitCode,
-                    stdout: stdout ? stdout.trim() : '',
-                    stderr: stderr ? stderr.trim() : '',
-                };
-                logger.info(`Script completed with exit code: ${exitCode}`);
-                if (stdout)
-                    logger.info(`stdout: ${stdout.substring(0, 200)}`);
-                if (stderr)
-                    logger.warn(`stderr: ${stderr.substring(0, 200)}`);
-                resolve(result);
-            });
+    return 1;
+}
+const handle = async (args) => {
+    const command = args.command;
+    if (!command)
+        return { success: false, error: 'command is required' };
+    try {
+        const { stdout, stderr } = await execAsync(command, {
+            timeout: (args.timeout ?? 30) * 1000,
+            cwd: args.cwd,
+            maxBuffer: 1024 * 1024,
+        });
+        return {
+            success: true,
+            stdout: String(stdout),
+            stderr: String(stderr),
+            exitCode: 0,
+        };
+    }
+    catch (e) {
+        if (e && typeof e === 'object' && 'stdout' in e && 'stderr' in e) {
+            const out = e;
+            return {
+                success: false,
+                stdout: out.stdout ?? '',
+                stderr: out.stderr ?? '',
+                exitCode: getExitCode(e),
+                error: e instanceof Error ? e.message : String(e),
+            };
         }
-        catch (e) {
-            logger.error(`Script execution failed: ${e.message}`);
-            resolve({ success: false, error: e.message });
-        }
-    });
+        return {
+            success: false,
+            exitCode: getExitCode(e),
+            error: e instanceof Error ? e.message : String(e),
+        };
+    }
 };
 exports.handle = handle;

@@ -39,82 +39,138 @@ const os = __importStar(require("os"));
 const fs = __importStar(require("fs"));
 const logger_1 = require("./logger");
 const logger = (0, logger_1.createLogger)('SystemUtils');
+const MIN_SERIAL_LEN = 5;
+const LINUX_ID_MAX_LEN = 12;
+const machineIdPaths = ['/etc/machine-id', '/var/lib/dbus/machine-id'];
+function getHostnameFallback() {
+    return os.hostname().toLowerCase().replace(/ /g, '-');
+}
+function extractSerialFromIoregLine(line) {
+    if (!line.includes('IOPlatformSerialNumber'))
+        return null;
+    const parts = line.split('"');
+    return parts.length >= 4 ? parts[parts.length - 2] : null;
+}
+function formatMacSerial(serial) {
+    const ok = serial && serial.length > MIN_SERIAL_LEN;
+    return ok ? `mac-${serial.toLowerCase()}` : null;
+}
+function parseIoregLine(line) {
+    return formatMacSerial(extractSerialFromIoregLine(line));
+}
+function parseSerialFromIoregOutput(output) {
+    for (const line of output.split('\n')) {
+        const result = parseIoregLine(line);
+        if (result)
+            return result;
+    }
+    return null;
+}
+function getMacSerialIoreg() {
+    try {
+        const output = (0, child_process_1.execSync)('ioreg -l', { encoding: 'utf-8', timeout: 5000 });
+        return parseSerialFromIoregOutput(output);
+    }
+    catch {
+        return null;
+    }
+}
+function parseSystemProfilerLine(line) {
+    if (!line.includes('Serial Number'))
+        return null;
+    const serial = line.split(':').pop()?.trim();
+    return serial ? `mac-${serial.toLowerCase()}` : null;
+}
+function parseSerialFromSystemProfilerOutput(output) {
+    for (const line of output.split('\n')) {
+        const result = parseSystemProfilerLine(line);
+        if (result)
+            return result;
+    }
+    return null;
+}
+function getMacSerialSystemProfiler() {
+    try {
+        const output = (0, child_process_1.execSync)('system_profiler SPHardwareDataType', {
+            encoding: 'utf-8',
+            timeout: 10000,
+        });
+        return parseSerialFromSystemProfilerOutput(output);
+    }
+    catch {
+        return null;
+    }
+}
+function getMacMachineId() {
+    const fromIoreg = getMacSerialIoreg();
+    if (fromIoreg)
+        return fromIoreg;
+    return getMacSerialSystemProfiler();
+}
+function tryReadMachineIdPath(path) {
+    if (!fs.existsSync(path))
+        return null;
+    try {
+        const id = fs.readFileSync(path, 'utf-8').trim().substring(0, LINUX_ID_MAX_LEN);
+        return `linux-${id}`;
+    }
+    catch {
+        return null;
+    }
+}
+function getLinuxIdFromFiles() {
+    for (const path of machineIdPaths) {
+        const id = tryReadMachineIdPath(path);
+        if (id)
+            return id;
+    }
+    return null;
+}
+function getLinuxIdDmidecode() {
+    try {
+        const output = (0, child_process_1.execSync)('sudo dmidecode -s system-serial-number', {
+            encoding: 'utf-8',
+            timeout: 5000,
+        });
+        const serial = output.trim();
+        return serial ? `linux-${serial.toLowerCase()}` : null;
+    }
+    catch {
+        return null;
+    }
+}
+function getLinuxMachineId() {
+    const fromFiles = getLinuxIdFromFiles();
+    if (fromFiles)
+        return fromFiles;
+    return getLinuxIdDmidecode();
+}
+function getPlatformMachineId() {
+    if (process.platform === 'darwin')
+        return getMacMachineId();
+    if (process.platform === 'linux')
+        return getLinuxMachineId();
+    return null;
+}
 /**
  * Get unique machine identifier.
- * - macOS: Uses hardware serial number
+ * - macOS: Uses hardware serial number (ioreg or system_profiler)
  * - Linux: Uses machine-id or DMI serial
  * - Fallback: hostname
  */
-function getMachineId() {
+function toErrorMessage(e) {
+    return e instanceof Error ? e.message : String(e);
+}
+function getMachineIdWithFallback() {
     try {
-        if (process.platform === 'darwin') {
-            // macOS - get hardware serial number
-            try {
-                const output = (0, child_process_1.execSync)('ioreg -l', { encoding: 'utf-8', timeout: 5000 });
-                const lines = output.split('\n');
-                for (const line of lines) {
-                    if (line.includes('IOPlatformSerialNumber')) {
-                        // Extract serial: "IOPlatformSerialNumber" = "XXXXXXXXXX"
-                        const parts = line.split('"');
-                        if (parts.length >= 4) {
-                            const serial = parts[parts.length - 2];
-                            if (serial && serial.length > 5) {
-                                return `mac-${serial.toLowerCase()}`;
-                            }
-                        }
-                    }
-                }
-            }
-            catch (e) {
-                // Ignore error, try fallback
-            }
-            // Fallback: try system_profiler
-            try {
-                const output = (0, child_process_1.execSync)('system_profiler SPHardwareDataType', { encoding: 'utf-8', timeout: 10000 });
-                const lines = output.split('\n');
-                for (const line of lines) {
-                    if (line.includes('Serial Number')) {
-                        const serial = line.split(':').pop()?.trim();
-                        if (serial) {
-                            return `mac-${serial.toLowerCase()}`;
-                        }
-                    }
-                }
-            }
-            catch (e) {
-                // Ignore error
-            }
-        }
-        else if (process.platform === 'linux') {
-            // Linux - try machine-id first
-            const machineIdFiles = ['/etc/machine-id', '/var/lib/dbus/machine-id'];
-            for (const path of machineIdFiles) {
-                if (fs.existsSync(path)) {
-                    try {
-                        const machineId = fs.readFileSync(path, 'utf-8').trim().substring(0, 12);
-                        return `linux-${machineId}`;
-                    }
-                    catch (e) {
-                        // Ignore
-                    }
-                }
-            }
-            // Fallback: try DMI serial
-            try {
-                const output = (0, child_process_1.execSync)('sudo dmidecode -s system-serial-number', { encoding: 'utf-8', timeout: 5000 });
-                const serial = output.trim();
-                if (serial) {
-                    return `linux-${serial.toLowerCase()}`;
-                }
-            }
-            catch (e) {
-                // Ignore
-            }
-        }
+        const id = getPlatformMachineId();
+        return id ?? getHostnameFallback();
     }
     catch (e) {
-        logger.warn(`Could not get machine ID: ${e.message}`);
+        logger.warn(`Could not get machine ID: ${toErrorMessage(e)}`);
+        return getHostnameFallback();
     }
-    // Final fallback: hostname
-    return os.hostname().toLowerCase().replace(/ /g, '-');
+}
+function getMachineId() {
+    return getMachineIdWithFallback();
 }
