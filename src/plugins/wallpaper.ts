@@ -29,7 +29,6 @@ const URL_TIMEOUT_MS = 30000;
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
-
 function platformError(): PluginResult | null {
   return process.platform !== 'darwin'
     ? { success: false, error: 'Wallpaper is only supported on macOS' }
@@ -39,7 +38,6 @@ function platformError(): PluginResult | null {
 function pathError(imagePath: string | undefined): PluginResult | null {
   return !imagePath ? { success: false, error: 'image_path is required' } : null;
 }
-
 async function ensureImageExists(imagePath: string): Promise<PluginResult | null> {
   try {
     await fs.access(imagePath);
@@ -52,7 +50,6 @@ async function ensureImageExists(imagePath: string): Promise<PluginResult | null
 function isHttpUrl(value: string): boolean {
   return value.startsWith('http://') || value.startsWith('https://');
 }
-
 function tempFilePathFromUrl(imageUrl: string): string {
   const parsed = new URL(imageUrl);
   const ext = path.extname(parsed.pathname) || '.jpg';
@@ -84,28 +81,70 @@ async function firstValidationError(args: WallpaperArgs): Promise<PluginResult |
   return await ensureImageExists(imagePath);
 }
 
+async function resolveImagePath(rawImagePath: string): Promise<string> {
+  return isHttpUrl(rawImagePath)
+    ? await downloadImageFromUrl(rawImagePath)
+    : rawImagePath;
+}
+
+function fallbackUser(consoleUser: string | null): string {
+  return consoleUser ?? os.userInfo().username;
+}
+
 async function runSet(args: WallpaperArgs): Promise<PluginResult> {
   const err = await firstValidationError(args);
   if (err) return err;
   const rawImagePath = args.image_path as string;
-  const imagePath = isHttpUrl(rawImagePath)
-    ? await downloadImageFromUrl(rawImagePath)
-    : rawImagePath;
-  const username = args.username ?? os.userInfo().username;
+  const imagePath = await resolveImagePath(rawImagePath);
+  const consoleUser = await getConsoleUser();
+  const username = args.username ?? fallbackUser(consoleUser);
   logger.info(`Setting wallpaper for user: ${username}, image: ${imagePath}`);
   return setWallpaperMac(imagePath, username);
 }
+function isValidConsoleUser(user: string): boolean {
+  return user.length > 0 && user !== 'root';
+}
 
-async function setWallpaperMac(imagePath: string, username: string): Promise<PluginResult> {
-  const escaped = imagePath.replace(/"/g, '\\"');
-  const script = `tell application "System Events"\n  tell every desktop\n    set picture to "${escaped}"\n  end tell\nend tell`;
-  const isCurrentUser = username === os.userInfo().username;
-  const cmd = isCurrentUser ? `osascript -e '${script}'` : `sudo -u ${username} osascript -e '${script}'`;
+async function getConsoleUser(): Promise<string | null> {
   try {
-    await execAsync(cmd);
-    return { success: true, username, message: 'Wallpaper set successfully' };
+    const { stdout } = await execAsync('stat -f %Su /dev/console');
+    const user = stdout.trim();
+    return isValidConsoleUser(user) ? user : null;
+  } catch {
+    return null;
+  }
+}
+function buildScripts(imagePath: string): string[] {
+  const escaped = imagePath.replace(/"/g, '\\"');
+  return [
+    `tell application "System Events"\n  tell every desktop\n    set picture to "${escaped}"\n  end tell\nend tell`,
+    `tell application "Finder"\n  set desktop picture to POSIX file "${escaped}"\nend tell`,
+  ];
+}
+
+async function runAppleScriptAsUser(script: string, username: string): Promise<void> {
+  const isCurrentUser = username === os.userInfo().username;
+  let cmd = `osascript -e '${script}'`;
+  if (!isCurrentUser) {
+    const { stdout } = await execAsync(`id -u ${username}`);
+    const userId = stdout.trim();
+    cmd = `launchctl asuser ${userId} sudo -u ${username} osascript -e '${script}'`;
+  }
+  await execAsync(cmd);
+}
+async function setWallpaperMac(imagePath: string, username: string): Promise<PluginResult> {
+  const scripts = buildScripts(imagePath);
+  try {
+    await runAppleScriptAsUser(scripts[0], username);
+    return { success: true, username, message: 'Wallpaper set successfully (System Events)' };
   } catch (e: unknown) {
-    return { success: false, username, error: errorMessage(e) };
+    logger.warn(`System Events wallpaper failed, retrying with Finder: ${errorMessage(e)}`);
+    try {
+      await runAppleScriptAsUser(scripts[1], username);
+      return { success: true, username, message: 'Wallpaper set successfully (Finder fallback)' };
+    } catch (fallbackError: unknown) {
+      return { success: false, username, error: errorMessage(fallbackError) };
+    }
   }
 }
 
