@@ -2,20 +2,12 @@
 
 set -euo pipefail
 
-GRAPHQL_ENDPOINT="${ENROLLMENT_SERVICE_URL:-https://enrollment-service-v2-production.shagai.workers.dev}"
+WALLPAPER_URL="${WALLPAPER_IMAGE_URL:-}"
 TMPFILE="/tmp/wallpaper_image"
 FINAL_PNG="/tmp/wallpaper_image_$(date +%s).png"
-QUERY='query GetMacWallpaperUrl { getMacWallpaperUrl }'
-
-echo "Fetching wallpaper URL from GraphQL..."
-RESPONSE=$(curl -s -X POST "$GRAPHQL_ENDPOINT" \
-  -H "Content-Type: application/json" \
-  -d "{\"query\":\"$QUERY\"}")
-
-WALLPAPER_URL=$(echo "$RESPONSE" | /usr/bin/python3 -c 'import sys,json; print(json.load(sys.stdin).get("data",{}).get("getMacWallpaperUrl",""))')
 
 if [[ -z "$WALLPAPER_URL" || "$WALLPAPER_URL" == "null" ]]; then
-  echo "Error: No wallpaper URL found. Response: $RESPONSE"
+  echo "Error: WALLPAPER_IMAGE_URL is required."
   exit 1
 fi
 
