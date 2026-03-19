@@ -35,8 +35,8 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handle = void 0;
 const child_process_1 = require("child_process");
-const os = __importStar(require("os"));
 const fs = __importStar(require("fs/promises"));
+const os = __importStar(require("os"));
 const logger_1 = require("../utils/logger");
 const logger = (0, logger_1.createLogger)('Plugin.System');
 const isRoot = () => process.getuid && process.getuid() === 0;
@@ -101,134 +101,13 @@ async function createUser(args) {
     }
 }
 async function deleteUser(args) {
-    const { username } = args;
-    const secure = args.secure !== false;
-    const forceDsclFallback = args.force_dscl_fallback !== false;
-    const removeSecureToken = args.remove_secure_token === true;
-    const userPassword = args.password;
-    const adminUser = args.admin_user;
-    const adminPassword = args.admin_password;
-    if (!username)
-        return { error: "Username required" };
+    const { username, admin_user, admin_password } = args;
+    if (!username || !admin_user || !admin_password)
+        return { error: "Username, admin_user, and admin_password required" };
     if (!isValidUsername(username))
         return { error: 'Invalid username format' };
-    if (process.platform === 'darwin') {
-        const usersBefore = await getMacUsers();
-        if (!usersBefore.success) {
-            return { success: false, error: usersBefore.error || usersBefore.stderr || 'Failed to list users before deletion' };
-        }
-        if (!usersBefore.users.includes(username)) {
-            return { success: false, error: `User ${username} does not exist`, user_exists: false };
-        }
-        if (removeSecureToken) {
-            if (!userPassword) {
-                return {
-                    success: false,
-                    error: "remove_secure_token=true requires 'password' for the target user",
-                };
-            }
-            const safeUserPassword = shQuote(userPassword);
-            let tokenCmd = rootCmd(`sysadminctl -secureTokenOff ${username} -password ${safeUserPassword}`);
-            if (adminUser && adminPassword) {
-                if (!isValidUsername(adminUser)) {
-                    return { success: false, error: 'Invalid admin_user format' };
-                }
-                const safeAdminPassword = shQuote(adminPassword);
-                tokenCmd = rootCmd(`sysadminctl -adminUser ${adminUser} -adminPassword ${safeAdminPassword} -secureTokenOff ${username} -password ${safeUserPassword}`);
-            }
-            const tokenResult = await execPromise(tokenCmd, { timeout: 30000 });
-            if (!tokenResult.success) {
-                return {
-                    success: false,
-                    error: `Could not remove Secure Token from ${username}: ${tokenResult.stderr || tokenResult.error || 'Unknown error'}`,
-                    secure_token_off_failed: true,
-                    stdout: tokenResult.stdout,
-                    stderr: tokenResult.stderr,
-                    returncode: tokenResult.returncode,
-                };
-            }
-            await sleep(1000);
-        }
-        // Username must come directly after -deleteUser
-        const cmd = rootCmd(`sysadminctl -deleteUser ${username}${secure ? ' -secure' : ''}`);
-        const result = await execPromise(cmd, { timeout: 60000 });
-        const stderr = result.stderr || '';
-        const sawSecureTokenError = stderr.includes('-14120') || stderr.includes('Error:-14120');
-        let verificationState = await waitForMacUserState(username);
-        let userStillExists = verificationState.exists;
-        if (userStillExists && forceDsclFallback) {
-            logger.warn(`User ${username} still present after sysadminctl, trying dscl fallback`);
-            const fallbackResult = await execPromise(rootCmd(`dscl . -delete /Users/${username}`), { timeout: 15000 });
-            verificationState = await waitForMacUserState(username);
-            userStillExists = verificationState.exists;
-            if (!fallbackResult.success) {
-                logger.warn(`dscl fallback failed for ${username}: ${fallbackResult.stderr || fallbackResult.error}`);
-            }
-        }
-        if (userStillExists) {
-            if (sawSecureTokenError) {
-                return {
-                    success: false,
-                    error: 'Secure Token blocked deletion (Error -14120). Retry with remove_secure_token=true, password=<user_password>, and optionally admin_user/admin_password.',
-                    verification_failed: true,
-                    verification: verificationState,
-                    stdout: result.stdout,
-                    stderr: result.stderr,
-                    returncode: result.returncode,
-                };
-            }
-            return {
-                success: false,
-                error: `User ${username} still appears in Directory Service after deletion`,
-                verification_failed: true,
-                verification: verificationState,
-                stdout: result.stdout,
-                stderr: result.stderr,
-                returncode: result.returncode,
-            };
-        }
-        const homeDir = `/Users/${username}`;
-        let homeDirectoryRemoved = true;
-        const homeExists = await pathExists(homeDir);
-        if (secure && homeExists) {
-            const rmResult = await execPromise(rootCmd(`rm -rf ${shQuote(homeDir)}`), { timeout: 60000 });
-            homeDirectoryRemoved = rmResult.success && !(await pathExists(homeDir));
-        }
-        else {
-            homeDirectoryRemoved = !homeExists;
-        }
-        if (sawSecureTokenError) {
-            logger.warn(`sysadminctl reported -14120 for ${username}, but user deletion was verified`);
-        }
-        return {
-            success: true,
-            message: `User ${username} deleted successfully`,
-            username,
-            secure_delete: secure,
-            home_directory_removed: homeDirectoryRemoved,
-            verified: true,
-            warnings: sawSecureTokenError ? ['sysadminctl reported -14120, but user was verified as deleted'] : [],
-            stdout: result.stdout,
-            stderr: result.stderr,
-        };
-    }
-    else {
-        const cmd = rootCmd(`userdel -r ${username}`);
-        const result = await execPromise(cmd);
-        if (!result.success)
-            return result;
-        const verify = await execPromise(`id ${username}`);
-        if (verify.success) {
-            return {
-                success: false,
-                error: `User ${username} still exists after deletion`,
-                verification_failed: true,
-                stdout: result.stdout,
-                stderr: result.stderr,
-            };
-        }
-        return { ...result, verified: true };
-    }
+    const cmd = rootCmd(`sysadminctl -adminUser ${admin_user} -adminPassword ${admin_password} -deleteUser ${username}`);
+    return await execPromise(cmd);
 }
 async function listUsers() {
     if (process.platform === 'darwin') {
@@ -289,6 +168,35 @@ async function getMacUserState(username) {
         listed_only: listedOnly,
         list_error: listed.success ? undefined : (listed.error || listed.stderr || undefined),
     };
+}
+async function getMacSecureTokenStatus(username) {
+    const tokenStatusResult = await execPromise(rootCmd(`sysadminctl -secureTokenStatus ${username}`), { timeout: 10000 });
+    const raw = `${tokenStatusResult.stdout}\n${tokenStatusResult.stderr}`;
+    const output = raw.toUpperCase();
+    if (output.includes('ENABLED')) {
+        return { enabled: true, known: true, raw };
+    }
+    if (output.includes('DISABLED')) {
+        return { enabled: false, known: true, raw };
+    }
+    return { enabled: false, known: false, raw };
+}
+async function terminateMacUserSession(username) {
+    const uidResult = await execPromise(`id -u ${username}`, { timeout: 10000 });
+    if (!uidResult.success)
+        return;
+    const uid = uidResult.stdout.trim();
+    if (!/^\d+$/.test(uid))
+        return;
+    await execPromise(rootCmd(`launchctl bootout user/${uid}`), { timeout: 10000 });
+    await execPromise(rootCmd(`pkill -TERM -u ${uid}`), { timeout: 10000 });
+    await sleep(1000);
+    await execPromise(rootCmd(`pkill -KILL -u ${uid}`), { timeout: 10000 });
+}
+async function refreshMacDirectoryServicesCache() {
+    await execPromise(rootCmd('dscacheutil -flushcache'), { timeout: 10000 });
+    await execPromise(rootCmd('killall opendirectoryd'), { timeout: 10000 });
+    await sleep(1000);
 }
 async function waitForMacUserState(username) {
     const retries = 8;

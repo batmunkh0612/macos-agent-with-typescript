@@ -38,6 +38,21 @@ const logger_1 = require("./utils/logger");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const logger = (0, logger_1.createLogger)('PluginManager');
+const SENSITIVE_KEY = /(password|admin_password|token|secret|api[_-]?key|authorization)/i;
+function redactSecrets(value, depth = 0) {
+    if (depth > 10)
+        return '[Truncated]';
+    if (Array.isArray(value))
+        return value.map(v => redactSecrets(v, depth + 1));
+    if (value && typeof value === 'object') {
+        const out = {};
+        for (const [k, v] of Object.entries(value)) {
+            out[k] = SENSITIVE_KEY.test(k) ? '[REDACTED]' : redactSecrets(v, depth + 1);
+        }
+        return out;
+    }
+    return value;
+}
 class PluginManager {
     constructor(pluginsDir = path.join(__dirname, 'plugins')) {
         this.plugins = new Map();
@@ -80,7 +95,7 @@ class PluginManager {
         }
     }
     async executePlugin(name, args) {
-        logger.info(`Executing plugin: ${name} with args: ${JSON.stringify(args)}`);
+        logger.info(`Executing plugin: ${name} with args: ${JSON.stringify(redactSecrets(args))}`);
         const plugin = this.plugins.get(name);
         if (!plugin) {
             const errorMsg = `Plugin '${name}' not found. Available: ${Array.from(this.plugins.keys()).join(', ')}`;
@@ -89,7 +104,7 @@ class PluginManager {
         }
         try {
             const result = await plugin.handle(args);
-            logger.info(`Plugin ${name} result: ${JSON.stringify(result)}`);
+            logger.info(`Plugin ${name} result: ${JSON.stringify(redactSecrets(result))}`);
             if (typeof result === 'object' && result !== null) {
                 if (!('success' in result)) {
                     result.success = true;

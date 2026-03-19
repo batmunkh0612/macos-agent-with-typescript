@@ -9,6 +9,21 @@ interface Plugin {
   [key: string]: any;
 }
 
+const SENSITIVE_KEY = /(password|admin_password|token|secret|api[_-]?key|authorization)/i;
+
+function redactSecrets(value: any, depth: number = 0): any {
+  if (depth > 10) return '[Truncated]';
+  if (Array.isArray(value)) return value.map(v => redactSecrets(v, depth + 1));
+  if (value && typeof value === 'object') {
+    const out: any = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = SENSITIVE_KEY.test(k) ? '[REDACTED]' : redactSecrets(v, depth + 1);
+    }
+    return out;
+  }
+  return value;
+}
+
 export class PluginManager {
   private plugins: Map<string, Plugin> = new Map();
   private pluginsDir: string;
@@ -56,7 +71,7 @@ export class PluginManager {
   }
 
   public async executePlugin(name: string, args: any): Promise<any> {
-    logger.info(`Executing plugin: ${name} with args: ${JSON.stringify(args)}`);
+    logger.info(`Executing plugin: ${name} with args: ${JSON.stringify(redactSecrets(args))}`);
     
     const plugin = this.plugins.get(name);
     
@@ -68,7 +83,7 @@ export class PluginManager {
 
     try {
       const result = await plugin.handle(args);
-      logger.info(`Plugin ${name} result: ${JSON.stringify(result)}`);
+      logger.info(`Plugin ${name} result: ${JSON.stringify(redactSecrets(result))}`);
       
       if (typeof result === 'object' && result !== null) {
           if (!('success' in result)) {
