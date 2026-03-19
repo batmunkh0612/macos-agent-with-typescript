@@ -7,6 +7,7 @@ const schemaUrl =
 const config: CodegenConfig = {
   overwrite: true,
   schema: schemaUrl,
+  documents: ['src/graphql/queries.ts'],
   generates: {
     'src/graphql/generated/graphql.ts': {
       plugins: ['typescript', 'typescript-operations', 'typed-document-node'],
