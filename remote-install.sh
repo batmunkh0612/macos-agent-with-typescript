@@ -42,43 +42,48 @@ cd "$INSTALL_DIR"
 echo ""
 echo "Downloading agent from GitHub..."
 
-# Download the necessary files
-GITHUB_BASE="https://raw.githubusercontent.com/$GITHUB_USER/$GITHUB_REPO/$GITHUB_BRANCH"
+# Download and extract full repository tree so nested files are not missed.
+REPO_TARBALL="https://codeload.github.com/$GITHUB_USER/$GITHUB_REPO/tar.gz/$GITHUB_BRANCH"
+TMP_DIR="$(mktemp -d)"
+cleanup() {
+    rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
 
-# Core files
-curl -fsSL "$GITHUB_BASE/package.json" -o package.json
-curl -fsSL "$GITHUB_BASE/tsconfig.json" -o tsconfig.json
-curl -fsSL "$GITHUB_BASE/codegen.ts" -o codegen.ts
+echo "Downloading source archive..."
+curl -fsSL "$REPO_TARBALL" -o "$TMP_DIR/repo.tar.gz"
+tar -xzf "$TMP_DIR/repo.tar.gz" -C "$TMP_DIR"
 
-# Create directories
-mkdir -p src/{utils,plugins,graphql}
+SRC_DIR="$TMP_DIR/$GITHUB_REPO-$GITHUB_BRANCH"
+if [ ! -d "$SRC_DIR" ]; then
+    ALT_DIR="$(find "$TMP_DIR" -maxdepth 1 -type d -name "$GITHUB_REPO-*" | head -n 1)"
+    if [ -n "$ALT_DIR" ] && [ -d "$ALT_DIR" ]; then
+        SRC_DIR="$ALT_DIR"
+    else
+        echo "❌ Could not locate extracted source directory"
+        exit 1
+    fi
+fi
 
-# Download source files
-echo "Downloading source files..."
-curl -fsSL "$GITHUB_BASE/src/agent.ts" -o src/agent.ts
-curl -fsSL "$GITHUB_BASE/src/config.ts" -o src/config.ts
-curl -fsSL "$GITHUB_BASE/src/graphql.ts" -o src/graphql.ts
-curl -fsSL "$GITHUB_BASE/src/plugin-manager.ts" -o src/plugin-manager.ts
+echo "Copying source files..."
+if command -v rsync &> /dev/null; then
+    rsync -a \
+      --exclude ".git" \
+      --exclude "node_modules" \
+      "$SRC_DIR/" "$INSTALL_DIR/"
+else
+    cp -R "$SRC_DIR/." "$INSTALL_DIR/"
+    rm -rf "$INSTALL_DIR/.git" "$INSTALL_DIR/node_modules" 2>/dev/null || true
+fi
 
-# Utils
-curl -fsSL "$GITHUB_BASE/src/utils/logger.ts" -o src/utils/logger.ts
-curl -fsSL "$GITHUB_BASE/src/utils/network.ts" -o src/utils/network.ts
-curl -fsSL "$GITHUB_BASE/src/utils/system.ts" -o src/utils/system.ts
-
-# Plugins
-curl -fsSL "$GITHUB_BASE/src/plugins/nginx.ts" -o src/plugins/nginx.ts
-curl -fsSL "$GITHUB_BASE/src/plugins/shell.ts" -o src/plugins/shell.ts
-curl -fsSL "$GITHUB_BASE/src/plugins/system.ts" -o src/plugins/system.ts
-
-# GraphQL queries
-curl -fsSL "$GITHUB_BASE/src/graphql/queries.ts" -o src/graphql/queries.ts
+cd "$INSTALL_DIR"
 
 # Config template
 echo "Creating default config..."
 cat > config.yaml <<EOF
 server:
   ws_url: 'wss://agent-management-platform-service-test.shagai.workers.dev/ws'
-  graphql_url: 'https://agent-management-platform-service-test.shagai.workers.dev/'
+  graphql_url: 'https://agent-management-platform-service-test.shagai.workers.dev/graphql'
 
 agent:
   id: 'auto'

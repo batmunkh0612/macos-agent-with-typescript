@@ -1,12 +1,8 @@
 import type { CodegenConfig } from '@graphql-codegen/cli';
 
-const schemaUrl =
-  process.env.GRAPHQL_SCHEMA_URL ??
-  'https://agent-management-platform-service-test.shagai.workers.dev/graphql';
-
 const config: CodegenConfig = {
   overwrite: true,
-  schema: schemaUrl,
+  schema: process.env.GRAPHQL_SCHEMA_URL ?? 'https://agent-management-platform-service-test.shagai.workers.dev/graphql',
   documents: ['src/graphql/queries.ts'],
   generates: {
     'src/graphql/generated/graphql.ts': {
@@ -15,5 +11,4 @@ const config: CodegenConfig = {
   },
   ignoreNoDocuments: true,
 };
-
 export default config;
