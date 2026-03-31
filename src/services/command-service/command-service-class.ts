@@ -5,8 +5,9 @@ import { buildCommandHandlers, buildStatusResponse } from './command-handlers';
 import { parseCommand } from './command-parse';
 import { processCommand } from './command-process';
 import { handleCommandResult, handleCommandError, errorMessage, updateAndNotify } from './command-result';
-import type { CommandServiceConfig, CommandHandler, PendingCommand } from './types';
+import type { CommandHandlerFn, CommandServiceConfig, CommandHandler, PendingCommand } from './types';
 import type { ResultHandlerContext } from './command-result';
+import { shouldPollOnWsDrop } from './should-poll-on-ws-drop';
 
 const logger = createLogger('CommandService');
 
@@ -18,7 +19,7 @@ export class CommandService {
   private running = false;
   private wsConnected = false;
   private handler: CommandHandler;
-  private commandHandlers: Map<string, (_cmd: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>>;
+  private commandHandlers: Map<string, CommandHandlerFn>;
   private resultCtx: ResultHandlerContext;
   private inFlightCommandIds = new Set<number>();
 
@@ -34,9 +35,11 @@ export class CommandService {
     this.handler = handler;
     this.resultCtx = { graphql, handler };
     const getStatus = () => this.getStatusResponse();
-    this.commandHandlers = buildCommandHandlers(pluginManager, getStatus);
+    this.commandHandlers = buildCommandHandlers(pluginManager, getStatus, {
+      graphql: this.graphql,
+      version: this.config.version,
+    });
   }
-
   private getStatusResponse(): Record<string, unknown> {
     return buildStatusResponse({
       agentId: this.config.agentId,
@@ -46,14 +49,16 @@ export class CommandService {
     });
   }
 
+  private triggerPollAfterDisconnect(wasConnected: boolean, connected: boolean): void {
+    if (!shouldPollOnWsDrop(this.running, wasConnected, connected)) return;
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    this.pollWithErrorHandling();
+  }
+
   public setWebSocketStatus(connected: boolean): void {
     const wasConnected = this.wsConnected;
     this.wsConnected = connected;
-    if (wasConnected && !connected && this.running) {
-      // Recover quickly when websocket drops instead of waiting for next interval.
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      this.pollWithErrorHandling();
-    }
+    this.triggerPollAfterDisconnect(wasConnected, connected);
   }
 
   public start(): void {
@@ -123,7 +128,6 @@ export class CommandService {
     if (pluginName) return 'plugin';
     return 'unknown';
   }
-
   private async executeCommandCore(cmd: PendingCommand): Promise<void> {
     const notify = (cmdId: number, status: string, result: Record<string, unknown>) =>
       updateAndNotify(this.resultCtx, cmdId, status, result);
@@ -151,9 +155,5 @@ export class CommandService {
     } finally {
       this.clearInFlight(cmd.id);
     }
-  }
-
-  public isRunning(): boolean {
-    return this.running;
   }
 }

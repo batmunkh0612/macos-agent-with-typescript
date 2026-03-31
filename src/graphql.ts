@@ -17,13 +17,20 @@ import {
   GetAgentStatusQuery,
 } from './graphql/generated/graphql';
 import { print } from 'graphql';
+import {
+  type AgentTsUpdatePayload,
+  GetAgentTsUpdateData,
+  GetAgentTsUpdateDocument,
+  GetAgentTsUpdateVariables,
+  parseTsUpdateResult,
+} from './graphql-agent-update';
+
+export type { AgentTsUpdatePayload } from './graphql-agent-update';
+
+type GraphQLErrorResult = { message: string };
 
 const logger = createLogger('GraphQLClient');
 const REQUEST_TIMEOUT_MS = 30000;
-
-type GraphQLErrorResult = {
-  message: string;
-};
 
 export class GraphQLClient {
   private url: string;
@@ -117,5 +124,13 @@ export class GraphQLClient {
   async getAgentStatus(): Promise<GetAgentStatusQuery['getAgentStatus']> {
     const result = await this.execute<GetAgentStatusQuery, Record<string, unknown>>(GetAgentStatusDocument);
     return result.data?.getAgentStatus || [];
+  }
+
+  async getAgentTsUpdate(currentVersion: string, force = false): Promise<AgentTsUpdatePayload | null> {
+    const result = await this.execute<GetAgentTsUpdateData, GetAgentTsUpdateVariables>(GetAgentTsUpdateDocument, {
+      currentVersion,
+      force: force ? true : null,
+    });
+    return parseTsUpdateResult(result);
   }
 }

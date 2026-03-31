@@ -12,7 +12,7 @@ export interface CommandHandler {
 }
 
 export type CommandHandlerFn = (
-  _command: Record<string, unknown>
+  _command?: Record<string, unknown>
 ) => Promise<Record<string, unknown>> | Record<string, unknown>;
 
 export interface CommandServiceDeps {

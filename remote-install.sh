@@ -29,6 +29,15 @@ echo "✓ Node.js version: $NODE_VERSION"
 echo ""
 echo "Installation directory: $INSTALL_DIR"
 
+# Keep existing config across upgrades so re-runs (MDM, curl|bash) need no manual edits.
+# Set FORCE_DEFAULT_CONFIG=true to replace config with the template below.
+CONFIG_SAVE=""
+if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/config.yaml" ] && [ "${FORCE_DEFAULT_CONFIG:-}" != "true" ]; then
+    CONFIG_SAVE="$(mktemp)"
+    cp "$INSTALL_DIR/config.yaml" "$CONFIG_SAVE"
+    echo "Existing config.yaml will be preserved after upgrade."
+fi
+
 # Remove old installation if exists
 if [ -d "$INSTALL_DIR" ]; then
     echo "Removing old installation..."
@@ -112,9 +121,13 @@ if [ ${#missing_files[@]} -gt 0 ]; then
   exit 1
 fi
 
-# Config template
-echo "Creating default config..."
-cat > config.yaml <<EOF
+# Config: restore from upgrade backup, or write first-install template
+if [ -n "${CONFIG_SAVE:-}" ] && [ -f "$CONFIG_SAVE" ]; then
+    mv "$CONFIG_SAVE" "$INSTALL_DIR/config.yaml"
+    echo "Restored preserved config.yaml (remote upgrade, no manual change needed)."
+else
+    echo "Creating default config..."
+    cat > config.yaml <<EOF
 server:
   ws_url: 'wss://agent-management-platform-service-test.shagai.workers.dev/ws'
   graphql_url: 'https://agent-management-platform-service-test.shagai.workers.dev/graphql'
@@ -139,6 +152,7 @@ updates:
   check_interval: 3600
   update_url: ''
 EOF
+fi
 
 echo ""
 echo "Installing dependencies..."

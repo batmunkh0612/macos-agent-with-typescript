@@ -8,10 +8,10 @@ import { WebSocketService } from './services/websocket-service';
 import { createLogger } from './utils/logger';
 
 const logger = createLogger('Agent');
-const VERSION = '2.1.0-ts';
-const RELEASE_DATE = '2026-02-09';
+const VERSION = '2.2.0-ts';
+const RELEASE_DATE = '2026-03-31';
 const RELEASE_NOTES =
-  'TypeScript port of the remote agent - Refactored with service-oriented architecture';
+  'Self-update (check_update / self_update), restart via launchd, GraphQL getAgentTsUpdate + URL mode';
 
 export class Agent {
   private config: AgentConfig;
@@ -30,14 +30,14 @@ export class Agent {
     this.agentId = this.config.get('agent').id;
     this.version = VERSION;
 
-    this.graphql = new GraphQLClient(this.config.get('server').graphql_url);
+    this.graphql = new GraphQLClient(this.config.get('server').graphqlUrl);
     this.pluginManager = new PluginManager(path.join(__dirname, 'plugins'));
 
     this.heartbeatService = new HeartbeatService(
       {
         agentId: this.agentId,
         version: this.version,
-        interval: this.config.get('agent').heartbeat_interval,
+        interval: this.config.get('agent').heartbeatInterval,
       },
       this.graphql
     );
@@ -46,7 +46,7 @@ export class Agent {
       {
         agentId: this.agentId,
         version: this.version,
-        pollInterval: this.config.get('agent').poll_interval,
+        pollInterval: this.config.get('agent').pollInterval,
       },
       this.graphql,
       this.pluginManager
@@ -54,7 +54,7 @@ export class Agent {
 
     this.websocketService = new WebSocketService(
       {
-        url: this.config.get('server').ws_url,
+        url: this.config.get('server').wsUrl,
         agentId: this.agentId,
         reconnectDelay: 5000,
         maxReconnectDelay: 60000,
@@ -88,14 +88,18 @@ export class Agent {
     this.commandService.setWebSocketStatus(wsConnected);
   }
 
+  private runShutdownHandler(handler: () => void): void {
+    try {
+      handler();
+    } catch (e: unknown) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      logger.error(`Error during shutdown: ${error.message}`);
+    }
+  }
+
   private executeShutdownHandlers(): void {
     for (const handler of this.shutdownHandlers) {
-      try {
-        handler();
-      } catch (e: unknown) {
-        const error = e instanceof Error ? e : new Error(String(e));
-        logger.error(`Error during shutdown: ${error.message}`);
-      }
+      this.runShutdownHandler(handler);
     }
   }
 

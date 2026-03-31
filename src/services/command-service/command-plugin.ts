@@ -11,5 +11,6 @@ export async function executePluginCommand(
   const pluginName = extractPluginName(command);
   if (!pluginName) return { success: false, error: "Missing 'plugin' field" };
   const args = (command.args ?? {}) as Record<string, unknown>;
-  return await pluginManager.executePlugin(pluginName, args);
+  const result = await pluginManager.executePlugin(pluginName, args);
+  return result as Record<string, unknown>;
 }

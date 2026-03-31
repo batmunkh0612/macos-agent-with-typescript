@@ -8,12 +8,12 @@ const logger = createLogger('Agent');
 async function main(): Promise<void> {
   const config = new AgentConfig();
 
-  if (config.get('network').wait_at_startup) {
+  if (config.get('network').waitAtStartup) {
     const networkConfig = config.get('network');
     const networkReady = await waitForNetwork(
       networkConfig.timeout,
-      networkConfig.check_interval,
-      networkConfig.check_url
+      networkConfig.checkInterval,
+      networkConfig.checkUrl
     );
     if (!networkReady) {
       logger.error('Exiting: network not available');
